@@ -3,22 +3,432 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Washington State Map</title>
+    <title>Washington State Explorer</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
 
     <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/leaflet.css" />
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Leaflet Tweaks */
+        .leaflet-popup-content-wrapper { 
+            border-radius: 0.75rem; 
+            padding: 0; 
+            overflow: hidden; 
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); 
+        }
+        .leaflet-popup-content { margin: 0; width: 280px !important; }
+        .leaflet-container a.leaflet-popup-close-button {
+            color: white;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+            font-size: 20px;
+            padding: 4px;
+        }
+        
+        /* Marker Animation */
+        .marker-pin { transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .marker-pin:hover { transform: scale(1.15) translateY(-5px); }
+        .marker-pin.active { transform: scale(1.25) translateY(-8px); border-color: #fbbf24; } /* Amber border for active */
+
+        /* Filter Button Active State */
+        .filter-btn.active {
+            background-color: #065f46;
+            color: white;
+            border-color: #065f46;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen flex flex-col md:flex-row overflow-hidden font-sans text-gray-800">
+
+    <!-- Sidebar -->
+    <div class="w-full md:w-1/3 lg:w-1/4 bg-white shadow-2xl z-20 flex flex-col h-1/2 md:h-full relative">
+        <!-- Header -->
+        <div class="p-6 bg-gradient-to-r from-emerald-900 to-emerald-800 text-white shrink-0 shadow-md">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <i class="ph-fill ph-map-trifold text-2xl text-emerald-400"></i>
+                    <h1 class="text-xl font-bold tracking-wide">WA Explorer</h1>
+                </div>
+                <button onclick="locateUser()" class="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors text-white" title="Locate Me">
+                    <i class="ph-bold ph-crosshair"></i>
+                </button>
+            </div>
+            <p class="text-emerald-200 text-xs uppercase tracking-wider mt-1 font-medium">Interactive Guide</p>
+        </div>
+
+        <!-- Controls (Search + Filter) -->
+        <div class="p-4 border-b border-gray-100 bg-white sticky top-0 z-10 space-y-3 shrink-0 shadow-sm">
+            <!-- Search -->
+            <div class="relative group">
+                <i class="ph-bold ph-magnifying-glass absolute left-3 top-2.5 text-gray-400 group-focus-within:text-emerald-600 transition-colors"></i>
+                <input type="text" id="search-input" placeholder="Find a destination..." 
+                       class="w-full bg-gray-50 text-sm rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:bg-white border border-gray-200 focus:border-emerald-500 transition-all">
+            </div>
+            
+            <!-- Filters -->
+            <div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar" id="filter-container">
+                <button class="filter-btn active px-3 py-1.5 text-xs font-bold rounded-full border border-gray-200 text-gray-500 hover:bg-gray-50 transition-all whitespace-nowrap" data-filter="all">All Places</button>
+                <button class="filter-btn px-3 py-1.5 text-xs font-bold rounded-full border border-gray-200 text-gray-500 hover:bg-gray-50 transition-all whitespace-nowrap" data-filter="city">Cities</button>
+                <button class="filter-btn px-3 py-1.5 text-xs font-bold rounded-full border border-gray-200 text-gray-500 hover:bg-gray-50 transition-all whitespace-nowrap" data-filter="nature">Nature</button>
+                <button class="filter-btn px-3 py-1.5 text-xs font-bold rounded-full border border-gray-200 text-gray-500 hover:bg-gray-50 transition-all whitespace-nowrap" data-filter="favorites">
+                    <i class="ph-fill ph-heart text-pink-500 mr-1"></i> Favorites
+                </button>
+            </div>
+        </div>
+
+        <!-- Location List -->
+        <div id="location-list" class="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50/50">
+            <!-- List items injected by JS -->
+        </div>
+
+        <!-- Footer / Reset -->
+        <div class="p-3 border-t border-gray-200 bg-white text-center shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+            <button onclick="resetMap()" class="text-xs font-bold text-emerald-700 hover:text-emerald-900 flex items-center justify-center gap-1.5 mx-auto transition-colors px-4 py-2 rounded-lg hover:bg-emerald-50">
+                <i class="ph-bold ph-arrows-counter-clockwise"></i> Reset Map View
+            </button>
+        </div>
+    </div>
+
+    <!-- Map Container -->
+    <div id="map" class="w-full md:w-2/3 lg:w-3/4 h-1/2 md:h-full z-10 bg-gray-200"></div>
 
     <!-- Leaflet JS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/leaflet.js"></script>
-</head>
-<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 
-    <h1>Washington State Interactive Map</h1>
-    <div id="map"></div>
+    <script>
+        // --- Data with Images ---
+        // Using Unsplash source URLs for demo purposes. In production, use optimized assets.
+        const locations = [
+            { 
+                id: 1,
+                name: "Seattle", 
+                type: "city", 
+                desc: "Emerald City, tech hub, and home of grunge music.", 
+                coords: [47.6062, -122.3321],
+                color: "bg-blue-600",
+                icon: "ph-buildings",
+                image: "https://images.unsplash.com/photo-1502175353174-a7a70e73b362?w=600&q=80"
+            },
+            { 
+                id: 2,
+                name: "Mount Rainier", 
+                type: "nature", 
+                desc: "Active volcano and national park icon.", 
+                coords: [46.8523, -121.7603],
+                color: "bg-emerald-600",
+                icon: "ph-mountains",
+                image: "https://images.unsplash.com/photo-1563721349-f00888915b24?w=600&q=80"
+            },
+            { 
+                id: 3,
+                name: "Olympic National Park", 
+                type: "nature", 
+                desc: "Rainforests, rugged coastlines, and mountains.", 
+                coords: [47.8021, -123.6044],
+                color: "bg-emerald-600",
+                icon: "ph-tree",
+                image: "https://images.unsplash.com/photo-1549909772-88f5a6c11648?w=600&q=80"
+            },
+            { 
+                id: 4,
+                name: "Space Needle", 
+                type: "landmark", 
+                desc: "1962 World's Fair futuristic tower.", 
+                coords: [47.6205, -122.3493],
+                color: "bg-purple-600",
+                icon: "ph-rocket",
+                image: "https://images.unsplash.com/photo-1543144824-c178f5a347b4?w=600&q=80"
+            },
+            { 
+                id: 5,
+                name: "Leavenworth", 
+                type: "city", 
+                desc: "Bavarian village in the Cascades.", 
+                coords: [47.5962, -120.6615],
+                color: "bg-orange-500",
+                icon: "ph-house-line",
+                image: "https://images.unsplash.com/photo-1605218427368-251f2385e254?w=600&q=80"
+            },
+            { 
+                id: 6,
+                name: "Palouse Falls", 
+                type: "nature", 
+                desc: "The official state waterfall.", 
+                coords: [46.6636, -118.2278],
+                color: "bg-cyan-600",
+                icon: "ph-waves",
+                image: "https://images.unsplash.com/photo-1526490332857-410c55032594?w=600&q=80"
+            },
+             { 
+                id: 7,
+                name: "Redmond", 
+                type: "city", 
+                desc: "Tech center, home to Microsoft.", 
+                coords: [47.6740, -122.1215],
+                color: "bg-blue-600",
+                icon: "ph-laptop",
+                image: "https://images.unsplash.com/photo-1506197061617-7f5c0b093236?w=600&q=80"
+            },
+            {
+                id: 8,
+                name: "Mount St. Helens",
+                type: "nature",
+                desc: "Volcano famous for its 1980 eruption.",
+                coords: [46.1914, -122.1956],
+                color: "bg-red-600",
+                icon: "ph-fire",
+                image: "https://images.unsplash.com/photo-1616782296574-e87713d29a5d?w=600&q=80"
+            },
+            {
+                id: 9,
+                name: "San Juan Islands",
+                type: "nature",
+                desc: "Archipelago known for kayaking and orcas.",
+                coords: [48.5362, -123.0850],
+                color: "bg-cyan-700",
+                icon: "ph-boat",
+                image: "https://images.unsplash.com/photo-1596489392185-15494eb5ac52?w=600&q=80"
+            }
+        ];
 
-    <!-- JavaScript for Map -->
-    <script src="script.js"></script>
+        // --- State ---
+        let currentFilter = 'all';
+        let currentSearch = '';
+        let favorites = JSON.parse(localStorage.getItem('waExplorerFavorites')) || [];
+        let markerLayers = []; 
 
+        // --- Initialization ---
+        // Base Layers
+        const streetLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            attribution: '© OpenStreetMap',
+            maxZoom: 19
+        });
+
+        const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri',
+            maxZoom: 17
+        });
+
+        const map = L.map('map', {
+            zoomControl: false,
+            layers: [streetLayer]
+        }).setView([47.4, -120.7], 7);
+
+        L.control.zoom({ position: 'topright' }).addTo(map);
+        
+        const baseMaps = {
+            "Street Map": streetLayer,
+            "Satellite": satelliteLayer
+        };
+        L.control.layers(baseMaps, null, { position: 'topright' }).addTo(map);
+
+        const markersGroup = L.layerGroup().addTo(map);
+
+        // --- Helpers ---
+        function createCustomIcon(location, isSelected = false) {
+            const extraClass = isSelected ? 'active' : '';
+            return L.divIcon({
+                className: 'custom-div-icon',
+                html: `
+                    <div class="${location.color} ${extraClass} marker-pin w-8 h-8 rounded-full border-2 border-white shadow-lg flex items-center justify-center text-white relative z-10">
+                        <i class="ph-fill ${location.icon} text-lg"></i>
+                    </div>
+                    <div class="w-2 h-2 bg-black/30 rounded-full blur-[2px] absolute bottom-[-4px] left-3 -z-10"></div>
+                `,
+                iconSize: [32, 32],
+                iconAnchor: [16, 32],
+                popupAnchor: [0, -28]
+            });
+        }
+
+        function toggleFavorite(id, event) {
+            if(event) event.stopPropagation();
+            
+            if (favorites.includes(id)) {
+                favorites = favorites.filter(favId => favId !== id);
+            } else {
+                favorites.push(id);
+            }
+            localStorage.setItem('waExplorerFavorites', JSON.stringify(favorites));
+            renderApp(); // Re-render to update UI
+        }
+
+        function locateUser() {
+            map.locate({setView: true, maxZoom: 10});
+        }
+        
+        map.on('locationfound', function(e) {
+            L.popup()
+                .setLatLng(e.latlng)
+                .setContent('<div class="text-center font-bold">You are here!</div>')
+                .openOn(map);
+        });
+
+        map.on('locationerror', function(e) {
+            alert("Could not access your location.");
+        });
+
+
+        // --- Core Logic: Render Map & List ---
+        function renderApp() {
+            // 1. Filter Data
+            const filteredLocs = locations.filter(loc => {
+                const matchesSearch = loc.name.toLowerCase().includes(currentSearch.toLowerCase()) || 
+                                      loc.desc.toLowerCase().includes(currentSearch.toLowerCase());
+                
+                if (!matchesSearch) return false;
+
+                if (currentFilter === 'all') return true;
+                if (currentFilter === 'favorites') return favorites.includes(loc.id);
+                return loc.type === currentFilter;
+            });
+
+            // 2. Update List
+            const listContainer = document.getElementById('location-list');
+            listContainer.innerHTML = '';
+            
+            if (filteredLocs.length === 0) {
+                const msg = currentFilter === 'favorites' ? "No favorites yet. Click the heart to add some!" : "No places found.";
+                listContainer.innerHTML = `
+                    <div class="text-center p-8 text-gray-400 mt-4">
+                        <i class="ph ph-mask-sad text-4xl mb-3 opacity-50"></i>
+                        <p class="text-sm font-medium">${msg}</p>
+                    </div>`;
+            }
+
+            // 3. Update Map Markers
+            markersGroup.clearLayers();
+            markerLayers = [];
+
+            filteredLocs.forEach((loc) => {
+                const isFav = favorites.includes(loc.id);
+
+                // -- Create Marker --
+                const marker = L.marker(loc.coords, {
+                    icon: createCustomIcon(loc)
+                });
+                
+                // Rich Popup Content
+                const popupContent = `
+                    <div class="font-sans relative">
+                        <div class="h-32 w-full bg-gray-200 relative overflow-hidden">
+                            <img src="${loc.image}" class="w-full h-full object-cover" alt="${loc.name}">
+                            <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+                            <h3 class="absolute bottom-3 left-4 font-bold text-xl text-white shadow-black drop-shadow-md">${loc.name}</h3>
+                        </div>
+                        <div class="p-4 pt-3">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-xs font-bold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-md">${loc.type}</span>
+                                <button onclick="toggleFavorite(${loc.id})" class="text-lg focus:outline-none transition-transform active:scale-90">
+                                    <i class="${isFav ? 'ph-fill text-pink-500' : 'ph-bold text-gray-400'} ph-heart"></i>
+                                </button>
+                            </div>
+                            <p class="text-sm text-gray-600 mb-4 leading-relaxed line-clamp-3">${loc.desc}</p>
+                            
+                            <a href="https://www.google.com/maps/dir/?api=1&destination=${loc.coords[0]},${loc.coords[1]}" target="_blank" 
+                               class="block w-full text-center bg-gray-900 hover:bg-black text-white text-xs font-bold py-2 rounded-lg transition-colors flex items-center justify-center gap-2">
+                                <i class="ph-bold ph-navigation-arrow"></i> Get Directions
+                            </a>
+                        </div>
+                    </div>
+                `;
+                marker.bindPopup(popupContent);
+                markersGroup.addLayer(marker);
+                markerLayers.push({ marker, loc });
+
+                // -- Create List Item --
+                const listItem = document.createElement('div');
+                listItem.className = "group bg-white p-3 rounded-xl hover:shadow-md cursor-pointer border border-gray-100 hover:border-emerald-300 transition-all duration-200 flex items-start gap-3 relative overflow-hidden";
+                listItem.innerHTML = `
+                    <div class="${loc.color} w-12 h-12 rounded-lg flex items-center justify-center text-white shrink-0 shadow-sm z-10">
+                        <i class="ph-fill ${loc.icon} text-xl"></i>
+                    </div>
+                    <div class="flex-1 z-10">
+                        <div class="flex justify-between items-start">
+                            <h3 class="font-bold text-gray-800 text-sm group-hover:text-emerald-700 transition-colors">${loc.name}</h3>
+                             <button class="fav-btn p-1 -mr-1 -mt-1 text-gray-300 hover:text-pink-500 transition-colors z-20" data-id="${loc.id}">
+                                <i class="${isFav ? 'ph-fill text-pink-500' : 'ph-bold'} ph-heart text-lg"></i>
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-500 line-clamp-2 mt-0.5">${loc.desc}</p>
+                    </div>
+                `;
+
+                // Interaction: List Item Click
+                listItem.addEventListener('click', (e) => {
+                    // Prevent click if clicking heart
+                    if(e.target.closest('.fav-btn')) return;
+
+                    map.flyTo(loc.coords, 10, { duration: 1.2 });
+                    marker.openPopup();
+                    
+                    document.querySelectorAll('#location-list > div').forEach(el => el.classList.remove('ring-2', 'ring-emerald-400', 'bg-emerald-50'));
+                    listItem.classList.add('ring-2', 'ring-emerald-400', 'bg-emerald-50');
+
+                    if(window.innerWidth < 768) {
+                        document.getElementById('map').scrollIntoView({behavior: 'smooth'});
+                    }
+                });
+
+                // Interaction: Heart Click in List
+                const favBtn = listItem.querySelector('.fav-btn');
+                favBtn.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Stop bubbling to list item click
+                    toggleFavorite(loc.id);
+                });
+
+                listContainer.appendChild(listItem);
+            });
+        }
+
+        // --- Event Listeners ---
+
+        // Filter Buttons
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                
+                // Handle click on icon inside button
+                const target = e.target.closest('.filter-btn');
+                target.classList.add('active');
+                
+                currentFilter = target.getAttribute('data-filter');
+                renderApp();
+            });
+        });
+
+        // Search Input
+        document.getElementById('search-input').addEventListener('input', (e) => {
+            currentSearch = e.target.value;
+            renderApp();
+        });
+
+        // Reset
+        function resetMap() {
+            map.flyTo([47.4, -120.7], 7);
+            map.closePopup();
+            document.querySelectorAll('#location-list > div').forEach(el => el.classList.remove('ring-2', 'ring-emerald-400', 'bg-emerald-50'));
+            // Optional: reset search/filter
+        }
+
+        // Global function for popup button to access
+        window.toggleFavorite = toggleFavorite;
+
+        // Initial Render
+        renderApp();
+
+    </script>
 </body>
 </html>
